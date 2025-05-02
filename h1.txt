@@ -1,105 +1,23 @@
-
 #!/bin/bash
 
-# Create mem2.bash from mem.bash and modify the log file to report2.log
-if [ -f "mem.bash" ]; then
-    cp mem.bash mem2.bash
-    sed -i 's/report\.log/report2\.log/g' mem2.bash
-    chmod +x mem2.bash
-else
-    echo "Error: mem.bash not found. Please create mem.bash first."
-    exit 1
-fi
+echo 'Time, MEM_used, Swap_used, UIRT_1, RES_1, %MEM_1, UIRT_2, RES_2, %MEM_2' > mem2.log
+./mem.bash &
+pid1=$!
+./mem2.bash &
+pid2=$!
 
-# Log file for the experiment
-REPORT_FILE="experiment_report.log"
-echo "Experiment Start: $(date)" > $REPORT_FILE
-echo "Monitoring mem.bash and mem2.bash..." >> $REPORT_FILE
-echo "----------------------------------------" >> $REPORT_FILE
+while kill -0 "$pid1" 2>/dev/null || kill -0 "$pid2" 2>/dev/null
+do
+    memUsed=$(free -m | awk '/Mem:/ {print $3}')
+    swapUsed=$(free -m | awk '/Swap:/ {print $3}')
 
-# Launch both scripts in the background
-bash mem.bash &
-MEM_PID=$!
-bash mem2.bash &
-MEM2_PID=$!
+    process=$(top -b -n 1 | awk -v p1="$pid1" -v p2="$pid2" '
+        $1 == p1 {virt1=$5; res1=$6; mem1=$10}
+        $1 == p2 {virt2=$5; res2=$6; mem2=$10}
+        END {printf "%s: %s: %s: %s: %s: %s", virt1, res1, mem1, virt2, res2, mem2}')
 
-# Function to check if a process is running
-is_running() {
-    ps -p $1 > /dev/null 2>&1
-    return $?
-}
-
-# Function to get memory stats
-get_memory_stats() {
-    # Extract mem: free and swap: used using free command (more reliable than parsing top)
-    FREE_MEM=$(free -m | grep Mem: | awk '{print $4}')
-    SWAP_USED=$(free -m | grep Swap: | awk '{print $3}')
-    echo "Memory Free: $FREE_MEM MiB, Swap Used: $SWAP_USED MiB"
-}
-
-# Function to get process stats for mem.bash and mem2.bash
-get_process_stats() {
-    local pid=$1
-    local name=$2
-    if is_running $pid; then
-        # Use ps to get VIRT, RES, %MEM for the process
-        ps -p $pid -o pid,comm,vsz,rss,%mem --no-headers | awk -v name="$name" '{print name " (PID " $1 "): VIRT=" $3/1024 " MiB, RES=" $4/1024 " MiB, %MEM=" $5}'
-    else
-        echo "$name (PID $pid): Not running"
-    fi
-}
-
-# Function to get top 5 processes
-get_top_five() {
-    echo "Top 5 Processes:"
-    # Use ps to get top 5 by %MEM
-    ps -eo pid,comm,%mem --sort=-%mem | head -n 6 | tail -n 5
-}
-
-# Monitor loop
-while is_running $MEM_PID || is_running $MEM2_PID; do
-    echo "----------------------------------------" >> $REPORT_FILE
-    echo "Timestamp: $(date)" >> $REPORT_FILE
-    
-    # Memory stats
-    echo -n "System Memory - " >> $REPORT_FILE
-    get_memory_stats >> $REPORT_FILE
-    
-    # Process stats for mem.bash
-    get_process_stats $MEM_PID "mem.bash" >> $REPORT_FILE
-    
-    # Process stats for mem2.bash
-    get_process_stats $MEM2_PID "mem2.bash" >> $REPORT_FILE
-    
-    # Top 5 processes
-    get_top_five >> $REPORT_FILE
-    
-    # Sleep for 5 seconds before next check
+    echo "$(date '+%H:%M:%S'), $memUsed, $swapUsed, $process" >> mem2.log
     sleep 5
 done
 
-# Both scripts have terminated
-echo "----------------------------------------" >> $REPORT_FILE
-echo "Experiment End: $(date)" >> $REPORT_FILE
-echo "Both scripts have terminated." >> $REPORT_FILE
-
-# Retrieve dmesg entries
-echo "dmesg Entries for mem.bash and mem2.bash:" >> $REPORT_FILE
-dmesg | grep "mem[2]*\.bash" | tail -n 5 >> $REPORT_FILE
-
-# Retrieve last lines from report.log and report2.log
-echo "Last line of report.log:" >> $REPORT_FILE
-if [ -f "report.log" ]; then
-    tail -n 1 report.log >> $REPORT_FILE
-else
-    echo "report.log not found." >> $REPORT_FILE
-fi
-
-echo "Last line of report2.log:" >> $REPORT_FILE
-if [ -f "report2.log" ]; then
-    tail -n 1 report2.log >> $REPORT_FILE
-else
-    echo "report2.log not found." >> $REPORT_FILE
-fi
-
-echo "Monitoring complete. Results saved to $REPORT_FILE"
+echo "Finished"
