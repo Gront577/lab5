@@ -1,14 +1,13 @@
 #!/bin/bash
 
-echo "Timestamp,UsedMem(MB),UsedSwap(MB),VIRT(MB),RES(MB),%MEM" > memory_usage.log
+# Очистка лог-файла и добавление заголовков
+echo "Time,UsedMem(MB),UsedSwap(MB),VIRT(MB),RES(MB),Process%" > memory_usage.log
 
+# Запуск mem.bash в фоне
 ./mem.bash &
-echo "Мониторинг PID: $!"
+echo "Мониторинг памяти процесса mem.bash (PID: $!)"
 
 while kill -0 "$!" 2>/dev/null; do
-    # Получаем timestamp
-    timestamp=$(date +%s)
-    
     # Системная память
     mem_used=$(free -m | awk '/Mem:/{print $3}')
     swap_used=$(free -m | awk '/Swap:/{print $3}')
@@ -16,12 +15,14 @@ while kill -0 "$!" 2>/dev/null; do
     # Данные процесса
     process_data=$(top -b -n 1 -p "$!" | awk -v pid="$!" '
         $1 == pid {
-            printf "%.1f,%.1f,%.1f", $5, $6, $10
+            printf "%.1f, %.1f, %.1f", $5, $6, $10  # VIRT(MB), RES(MB), %MEM
         }
     ')
     
     # Запись данных
-    echo "$timestamp,$mem_used,$swap_used,$process_data" >> memory_usage.log
+    echo "$(date '+%H:%M:%S'),$mem_used,$swap_used,$process_data" >> memory_usage.log
     
     sleep 1
 done
+
+echo "Мониторинг завершен. Данные сохранены в memory_usage.log"
